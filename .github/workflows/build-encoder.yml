@@ -4,15 +4,21 @@ on:
   push:
     paths:
       - 'Encoder/**'
+      - 'Unity/Runtime/QAnimatorFormat.cs'
+      - 'Unity/Runtime/QAnimatorDecoder.cs'
+      - 'Tests/**'
       - '.github/workflows/build-encoder.yml'
   pull_request:
     paths:
       - 'Encoder/**'
+      - 'Unity/Runtime/QAnimatorFormat.cs'
+      - 'Unity/Runtime/QAnimatorDecoder.cs'
+      - 'Tests/**'
       - '.github/workflows/build-encoder.yml'
   workflow_dispatch:
 
 jobs:
-  build:
+  build-and-test:
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -25,6 +31,9 @@ jobs:
 
       - name: Build encoder
         run: dotnet build Encoder/QAnimator.Encoder.csproj -c Release
+
+      - name: Run codec round-trip smoke test
+        run: dotnet run --project Tests/QAnimator.CodecSmoke/QAnimator.CodecSmoke.csproj -c Release
 
       - name: Publish Windows x64
         run: dotnet publish Encoder/QAnimator.Encoder.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o artifacts/QAnimatorEncoder
