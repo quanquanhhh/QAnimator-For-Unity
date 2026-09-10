@@ -4,12 +4,29 @@ using QAnimator.Unity;
 
 if (args.Length > 0)
 {
+    if (args[0] == "--dump-frame")
+    {
+        if (args.Length != 4)
+            throw new ArgumentException("Usage: --dump-frame <file.bytes> <frameIndex> <output.rgba>");
+        await DumpFrame(args[1], int.Parse(args[2]), args[3]);
+        return;
+    }
+
+    if (args[0] == "--require-alpha")
+    {
+        if (args.Length != 2)
+            throw new ArgumentException("Usage: --require-alpha <file.bytes>");
+        await RequireAlpha(args[1]);
+        return;
+    }
+
     await ValidateEncodedFile(args[0]);
     return;
 }
 
 await RunRoundTripCase(width: 32, height: 32, fps: 10, frameCount: 6, keyInterval: 3, blockSize: 8, alpha: true);
 await RunRoundTripCase(width: 37, height: 29, fps: 12, frameCount: 9, keyInterval: 4, blockSize: 16, alpha: true);
+await RunRoundTripCase(width: 23, height: 31, fps: 24, frameCount: 7, keyInterval: 2, blockSize: 7, alpha: false);
 await RunUnchangedFrameCase();
 
 Console.WriteLine("QAnimator codec smoke tests passed.");
@@ -23,8 +40,6 @@ static async Task RunRoundTripCase(int width, int height, int fps, int frameCoun
     for (int frame = 0; frame < frameCount; frame++)
     {
         byte[] pixels = new byte[frameBytes];
-
-        // Transparent background with a moving opaque rectangle and changing alpha edge.
         int squareX = (frame * 3) % Math.Max(1, width - 1);
         int squareY = (frame * 2) % Math.Max(1, height - 1);
         for (int y = squareY; y < Math.Min(squareY + 8, height); y++)
@@ -35,7 +50,7 @@ static async Task RunRoundTripCase(int width, int height, int fps, int frameCoun
                 pixels[p + 0] = (byte)(20 + frame * 17);
                 pixels[p + 1] = (byte)(180 - frame * 9);
                 pixels[p + 2] = 90;
-                pixels[p + 3] = (byte)(x == squareX || y == squareY ? 128 : 255);
+                pixels[p + 3] = alpha ? (byte)(x == squareX || y == squareY ? 128 : 255) : (byte)255;
             }
         }
 
@@ -49,15 +64,7 @@ static async Task RunRoundTripCase(int width, int height, int fps, int frameCoun
     try
     {
         var encoder = new QAnimatorEncoder();
-        var settings = new EncodeSettings(
-            width,
-            height,
-            fps,
-            keyInterval,
-            blockSize,
-            CompressionLevel.Optimal,
-            alpha);
-
+        var settings = new EncodeSettings(width, height, fps, keyInterval, blockSize, CompressionLevel.Optimal, alpha);
         await encoder.EncodeAsync(rgbaStream, outputPath, settings, progress: null, CancellationToken.None);
 
         byte[] encoded = await File.ReadAllBytesAsync(outputPath);
@@ -84,8 +91,7 @@ static async Task RunRoundTripCase(int width, int height, int fps, int frameCoun
     }
     finally
     {
-        if (File.Exists(outputPath))
-            File.Delete(outputPath);
+        if (File.Exists(outputPath)) File.Delete(outputPath);
     }
 }
 
@@ -106,20 +112,15 @@ static async Task RunUnchangedFrameCase()
     }
 
     using var stream = new MemoryStream();
-    for (int i = 0; i < frameCount; i++)
-        stream.Write(frame, 0, frame.Length);
+    for (int i = 0; i < frameCount; i++) stream.Write(frame, 0, frame.Length);
     stream.Position = 0;
 
     string outputPath = Path.Combine(Path.GetTempPath(), $"qanim-static-{Guid.NewGuid():N}.bytes");
     try
     {
         var encoder = new QAnimatorEncoder();
-        await encoder.EncodeAsync(
-            stream,
-            outputPath,
-            new EncodeSettings(width, height, fps, 4, 16, CompressionLevel.Fastest, true),
-            null,
-            CancellationToken.None);
+        await encoder.EncodeAsync(stream, outputPath,
+            new EncodeSettings(width, height, fps, 4, 16, CompressionLevel.Fastest, true), null, CancellationToken.None);
 
         var decoder = new QAnimatorDecoder(await File.ReadAllBytesAsync(outputPath));
         for (int i = 0; i < frameCount; i++)
@@ -130,8 +131,7 @@ static async Task RunUnchangedFrameCase()
     }
     finally
     {
-        if (File.Exists(outputPath))
-            File.Delete(outputPath);
+        if (File.Exists(outputPath)) File.Delete(outputPath);
     }
 }
 
@@ -143,9 +143,7 @@ static async Task ValidateEncodedFile(string path)
     Assert(decoder.FrameCount > 0, "Encoded file contains no frames");
     Assert(decoder.Fps > 0, "Invalid FPS");
 
-    for (int i = 0; i < decoder.FrameCount; i++)
-        decoder.DecodeFrame(i);
-
+    for (int i = 0; i < decoder.FrameCount; i++) decoder.DecodeFrame(i);
     if (decoder.FrameCount > 2)
     {
         decoder.DecodeFrame(decoder.FrameCount - 1);
@@ -156,8 +154,33 @@ static async Task ValidateEncodedFile(string path)
     Console.WriteLine($"Validated {Path.GetFileName(path)}: {decoder.Width}x{decoder.Height}, {decoder.FrameCount} frames @ {decoder.Fps:0.###}fps, alpha={decoder.HasAlpha}");
 }
 
+static async Task RequireAlpha(string path)
+{
+    var decoder = new QAnimatorDecoder(await File.ReadAllBytesAsync(path));
+    Assert(decoder.HasAlpha, $"{Path.GetFileName(path)} is not marked as alpha-capable.");
+    decoder.DecodeFrame(0);
+    bool hasTransparentPixel = false;
+    bool hasVisiblePixel = false;
+    for (int i = 3; i < decoder.RgbaBuffer.Length; i += 4)
+    {
+        byte a = decoder.RgbaBuffer[i];
+        if (a < 255) hasTransparentPixel = true;
+        if (a > 0) hasVisiblePixel = true;
+    }
+    Assert(hasTransparentPixel, "Decoded alpha frame contains no transparent pixels.");
+    Assert(hasVisiblePixel, "Decoded alpha frame contains no visible pixels.");
+    Console.WriteLine("Alpha validation passed.");
+}
+
+static async Task DumpFrame(string path, int frameIndex, string outputPath)
+{
+    var decoder = new QAnimatorDecoder(await File.ReadAllBytesAsync(path));
+    decoder.DecodeFrame(frameIndex);
+    await File.WriteAllBytesAsync(outputPath, decoder.RgbaBuffer);
+    Console.WriteLine($"Wrote decoded frame {frameIndex} to {outputPath}");
+}
+
 static void Assert(bool condition, string message)
 {
-    if (!condition)
-        throw new InvalidOperationException(message);
+    if (!condition) throw new InvalidOperationException(message);
 }
