@@ -135,6 +135,18 @@ namespace QAnimator.Unity
             DisposeTexture(notify: true);
         }
 
+        public void Play(TextAsset asset)
+        {
+            Load(asset);
+            Play();
+        }
+
+        public void Play(byte[] data)
+        {
+            Load(data);
+            Play();
+        }
+
         public void Play()
         {
             EnsureLoaded();
