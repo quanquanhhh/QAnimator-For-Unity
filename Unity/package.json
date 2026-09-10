@@ -1,0 +1,17 @@
+{
+  "name": "com.quanquanhhh.qanimator",
+  "version": "0.1.0",
+  "displayName": "QAnimator for Unity",
+  "description": "Custom .bytes 2D animation runtime for Unity. Decodes QAnimator frames directly to Texture2D without Unity VideoPlayer or runtime FFmpeg.",
+  "unity": "6000.0",
+  "keywords": [
+    "animation",
+    "2d",
+    "video",
+    "texture",
+    "runtime"
+  ],
+  "author": {
+    "name": "quanquanhhh"
+  }
+}
