@@ -23,19 +23,21 @@ namespace QAnimator.Unity
         {
             if (_player == null) return;
             _player.OnTextureCreated += HandleTextureCreated;
+            _player.OnTextureReleased += HandleTextureReleased;
             if (_player.Texture != null)
                 HandleTextureCreated(_player.Texture);
         }
 
         private void OnDisable()
         {
-            if (_player != null)
-                _player.OnTextureCreated -= HandleTextureCreated;
+            if (_player == null) return;
+            _player.OnTextureCreated -= HandleTextureCreated;
+            _player.OnTextureReleased -= HandleTextureReleased;
         }
 
         private void HandleTextureCreated(Texture2D texture)
         {
-            DisposeSprite();
+            DisposeSprite(clearRenderer: false);
             _sprite = Sprite.Create(
                 texture,
                 new Rect(0, 0, texture.width, texture.height),
@@ -47,13 +49,20 @@ namespace QAnimator.Unity
             _renderer.sprite = _sprite;
         }
 
-        private void OnDestroy()
+        private void HandleTextureReleased()
         {
-            DisposeSprite();
+            DisposeSprite(clearRenderer: true);
         }
 
-        private void DisposeSprite()
+        private void OnDestroy()
         {
+            DisposeSprite(clearRenderer: true);
+        }
+
+        private void DisposeSprite(bool clearRenderer)
+        {
+            if (clearRenderer && _renderer != null)
+                _renderer.sprite = null;
             if (_sprite == null) return;
 #if UNITY_EDITOR
             if (!Application.isPlaying)
