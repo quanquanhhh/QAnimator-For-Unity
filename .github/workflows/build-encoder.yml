@@ -4,13 +4,13 @@ on:
   push:
     paths:
       - 'Encoder/**'
-      - 'Unity/Runtime/**'
+      - 'Unity/**'
       - 'Tests/**'
       - '.github/workflows/build-encoder.yml'
   pull_request:
     paths:
       - 'Encoder/**'
-      - 'Unity/Runtime/**'
+      - 'Unity/**'
       - 'Tests/**'
       - '.github/workflows/build-encoder.yml'
   workflow_dispatch:
@@ -26,6 +26,23 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+
+      - name: Validate Unity package manifest
+        shell: pwsh
+        run: |
+          $pkg = Get-Content Unity/package.json -Raw | ConvertFrom-Json
+          if ($pkg.name -ne 'com.quanquanhhh.qanimator') { throw 'Unexpected Unity package name.' }
+          if (-not $pkg.unity.StartsWith('6000.')) { throw 'QAnimator Unity package must target Unity 6000.' }
+
+      - name: Guard runtime from video/system decoder dependencies
+        shell: pwsh
+        run: |
+          $patterns = @('UnityEngine\.Video', '\bVideoPlayer\b', '\bFFmpeg\b', '\bffmpeg\b', 'System\.Diagnostics\.Process')
+          $hits = Get-ChildItem Unity/Runtime -Filter *.cs -Recurse | Select-String -Pattern $patterns
+          if ($hits) {
+            $hits | ForEach-Object { Write-Host "$($_.Path):$($_.LineNumber): $($_.Line)" }
+            throw 'Unity Runtime must remain a custom decoder and may not depend on VideoPlayer/FFmpeg/system processes.'
+          }
 
       - name: Build encoder
         run: dotnet build Encoder/QAnimator.Encoder.csproj -c Release
