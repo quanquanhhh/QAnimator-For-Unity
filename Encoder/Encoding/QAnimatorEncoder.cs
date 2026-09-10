@@ -21,12 +21,15 @@ internal sealed class QAnimatorEncoder
         IProgress<double>? progress,
         CancellationToken cancellationToken)
     {
-        if (settings.Width <= 0 || settings.Height <= 0)
-            throw new ArgumentOutOfRangeException(nameof(settings), "Width/height must be positive.");
-        if (settings.Fps <= 0)
-            throw new ArgumentOutOfRangeException(nameof(settings), "FPS must be positive.");
-        if (settings.KeyFrameInterval <= 0)
-            throw new ArgumentOutOfRangeException(nameof(settings), "Key frame interval must be positive.");
+        ArgumentNullException.ThrowIfNull(rgbaFrameStream);
+        if (string.IsNullOrWhiteSpace(outputPath))
+            throw new ArgumentException("Output path is required.", nameof(outputPath));
+        if (settings.Width <= 0 || settings.Height <= 0 || settings.Width > ushort.MaxValue || settings.Height > ushort.MaxValue)
+            throw new ArgumentOutOfRangeException(nameof(settings), $"Width/height must be between 1 and {ushort.MaxValue} for QANM v1.");
+        if (settings.Fps <= 0 || settings.Fps > 1000)
+            throw new ArgumentOutOfRangeException(nameof(settings), "FPS must be between 1 and 1000.");
+        if (settings.KeyFrameInterval <= 0 || settings.KeyFrameInterval > ushort.MaxValue)
+            throw new ArgumentOutOfRangeException(nameof(settings), $"Key frame interval must be between 1 and {ushort.MaxValue}.");
         if (settings.BlockSize <= 0 || settings.BlockSize > ushort.MaxValue)
             throw new ArgumentOutOfRangeException(nameof(settings), "Block size is invalid.");
 
@@ -34,8 +37,12 @@ internal sealed class QAnimatorEncoder
         byte[] current = new byte[frameBytes];
         byte[] previous = new byte[frameBytes];
 
-        string tempPath = outputPath + ".frames.tmp";
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath))!);
+        string fullOutputPath = Path.GetFullPath(outputPath);
+        string outputDirectory = Path.GetDirectoryName(fullOutputPath)!;
+        Directory.CreateDirectory(outputDirectory);
+        string token = Guid.NewGuid().ToString("N");
+        string frameTempPath = Path.Combine(outputDirectory, $".{Path.GetFileName(outputPath)}.{token}.frames.tmp");
+        string finalTempPath = Path.Combine(outputDirectory, $".{Path.GetFileName(outputPath)}.{token}.output.tmp");
 
         var entries = new List<QFrameIndexEntry>();
         int nearestKey = 0;
@@ -43,7 +50,7 @@ internal sealed class QAnimatorEncoder
 
         try
         {
-            await using (var temp = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 1024, useAsync: true))
+            await using (var temp = new FileStream(frameTempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1024 * 1024, useAsync: true))
             {
                 for (int frameIndex = 0; ; frameIndex++)
                 {
@@ -61,7 +68,7 @@ internal sealed class QAnimatorEncoder
                     if (isKey)
                     {
                         nearestKey = frameIndex;
-                        rawPayload = current.ToArray();
+                        rawPayload = current.AsSpan().ToArray();
                     }
                     else
                     {
@@ -79,14 +86,14 @@ internal sealed class QAnimatorEncoder
                         rawPayload.Length,
                         frameIndex / (double)settings.Fps));
 
-                    tempOffset += compressed.Length;
+                    tempOffset = checked(tempOffset + compressed.Length);
                     Buffer.BlockCopy(current, 0, previous, 0, frameBytes);
                     progress?.Report(frameIndex + 1);
                 }
             }
 
             if (entries.Count == 0)
-                throw new InvalidDataException("FFmpeg produced no frames.");
+                throw new InvalidDataException("FFmpeg/source stream produced no complete RGBA frames.");
 
             var header = new QAnimatorHeader
             {
@@ -100,24 +107,30 @@ internal sealed class QAnimatorEncoder
                 KeyFrameInterval = checked((ushort)settings.KeyFrameInterval),
                 BlockSize = checked((ushort)settings.BlockSize),
                 FrameIndexOffset = QAnimatorHeader.SerializedSize,
-                FrameDataOffset = QAnimatorHeader.SerializedSize + (long)entries.Count * QFrameIndexEntry.SerializedSize,
+                FrameDataOffset = checked(QAnimatorHeader.SerializedSize + (long)entries.Count * QFrameIndexEntry.SerializedSize),
             };
 
-            await using var output = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 1024, useAsync: true);
-            using (var writer = new BinaryWriter(output, System.Text.Encoding.UTF8, leaveOpen: true))
+            await using (var output = new FileStream(finalTempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1024 * 1024, useAsync: true))
             {
-                header.Write(writer);
-                foreach (var entry in entries)
-                    entry.Write(writer);
+                using (var writer = new BinaryWriter(output, System.Text.Encoding.UTF8, leaveOpen: true))
+                {
+                    header.Write(writer);
+                    foreach (var entry in entries)
+                        entry.Write(writer);
+                }
+
+                await using var input = new FileStream(frameTempPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, useAsync: true);
+                await input.CopyToAsync(output, 1024 * 1024, cancellationToken);
+                await output.FlushAsync(cancellationToken);
             }
 
-            await using var input = new FileStream(tempPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, useAsync: true);
-            await input.CopyToAsync(output, 1024 * 1024, cancellationToken);
-            await output.FlushAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(finalTempPath, fullOutputPath, overwrite: true);
         }
         finally
         {
-            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+            TryDelete(frameTempPath);
+            TryDelete(finalTempPath);
         }
     }
 
@@ -151,16 +164,16 @@ internal sealed class QAnimatorEncoder
                 if (!BlockChanged(previous, current, width, x, y, bw, bh))
                     continue;
 
-                changed++;
-                writer.Write((ushort)x);
-                writer.Write((ushort)y);
-                writer.Write((ushort)bw);
-                writer.Write((ushort)bh);
+                changed = checked(changed + 1);
+                writer.Write(checked((ushort)x));
+                writer.Write(checked((ushort)y));
+                writer.Write(checked((ushort)bw));
+                writer.Write(checked((ushort)bh));
 
                 for (int row = 0; row < bh; row++)
                 {
-                    int offset = ((y + row) * width + x) * 4;
-                    writer.Write(current, offset, bw * 4);
+                    int offset = checked(((y + row) * width + x) * 4);
+                    writer.Write(current, offset, checked(bw * 4));
                 }
             }
         }
@@ -173,10 +186,10 @@ internal sealed class QAnimatorEncoder
 
     private static bool BlockChanged(byte[] a, byte[] b, int width, int x, int y, int bw, int bh)
     {
-        int rowBytes = bw * 4;
+        int rowBytes = checked(bw * 4);
         for (int row = 0; row < bh; row++)
         {
-            int offset = ((y + row) * width + x) * 4;
+            int offset = checked(((y + row) * width + x) * 4);
             if (!a.AsSpan(offset, rowBytes).SequenceEqual(b.AsSpan(offset, rowBytes)))
                 return true;
         }
@@ -189,5 +202,17 @@ internal sealed class QAnimatorEncoder
         using (var deflate = new DeflateStream(output, level, leaveOpen: true))
             deflate.Write(input, 0, input.Length);
         return output.ToArray();
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch
+        {
+            // Best-effort cleanup of temporary files.
+        }
     }
 }
