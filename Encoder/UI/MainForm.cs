@@ -36,6 +36,7 @@ internal sealed class MainForm : Form
         AllowDrop = true;
         DragEnter += OnDragEnter;
         DragDrop += OnDragDrop;
+        FormClosing += (_, _) => _cts?.Cancel();
 
         BuildUi();
         ApplyDarkTheme(this);
@@ -81,16 +82,18 @@ internal sealed class MainForm : Form
         _grid.Columns.Add("Input", "输入文件");
         _grid.Columns.Add("Resolution", "分辨率");
         _grid.Columns.Add("Fps", "FPS");
+        _grid.Columns.Add("Alpha", "Alpha");
         _grid.Columns.Add("Output", "输出文件");
         _grid.Columns.Add("Status", "状态");
         _grid.Columns.Add("Progress", "进度");
-        _grid.Columns[0].FillWeight = 35;
-        _grid.Columns[1].FillWeight = 150;
+        _grid.Columns[0].FillWeight = 30;
+        _grid.Columns[1].FillWeight = 145;
         _grid.Columns[2].FillWeight = 70;
-        _grid.Columns[3].FillWeight = 45;
-        _grid.Columns[4].FillWeight = 150;
-        _grid.Columns[5].FillWeight = 60;
-        _grid.Columns[6].FillWeight = 55;
+        _grid.Columns[3].FillWeight = 42;
+        _grid.Columns[4].FillWeight = 42;
+        _grid.Columns[5].FillWeight = 140;
+        _grid.Columns[6].FillWeight = 60;
+        _grid.Columns[7].FillWeight = 55;
         group.Controls.Add(_grid);
         return group;
     }
@@ -116,16 +119,41 @@ internal sealed class MainForm : Form
         panel.Controls.Add(Button("添加文件", AddFiles));
         panel.Controls.Add(Button("移除选中任务", RemoveSelected));
         panel.Controls.Add(Button("清除完成", ClearFinished));
-        panel.Controls.Add(Button("清除全部", (_, _) => { if (_cts == null) { _jobs.Clear(); RefreshGrid(); } }));
+        panel.Controls.Add(Button("清除全部", (_, _) =>
+        {
+            if (_cts != null) return;
+            _jobs.Clear();
+            RefreshGrid();
+        }));
+        panel.Controls.Add(Button("打开输出目录", (_, _) =>
+        {
+            try
+            {
+                Directory.CreateDirectory(_outputFolder.Text);
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = _outputFolder.Text,
+                    UseShellExecute = true,
+                });
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"无法打开输出目录: {ex.Message}");
+            }
+        }));
 
         _startButton.Text = "开始所有任务";
         _startButton.AutoSize = true;
+        _startButton.Padding = new Padding(8, 2, 8, 2);
         _startButton.BackColor = Color.FromArgb(58, 174, 82);
+        _startButton.ForeColor = Color.White;
+        _startButton.FlatStyle = FlatStyle.Flat;
         _startButton.Click += StartAll;
         panel.Controls.Add(_startButton);
 
         _stopButton.Text = "停止所有任务";
         _stopButton.AutoSize = true;
+        _stopButton.Padding = new Padding(8, 2, 8, 2);
         _stopButton.Enabled = false;
         _stopButton.Click += (_, _) => _cts?.Cancel();
         panel.Controls.Add(_stopButton);
@@ -149,7 +177,7 @@ internal sealed class MainForm : Form
 
         _outputFolder.Text = Environment.GetFolderPath(Environment.SpecialFolder.MyVideos);
         _outputFolder.Dock = DockStyle.Fill;
-        AddRow(grid, 0, "输出文件夹", _outputFolder, "", BrowseOutputButton());
+        AddPair(grid, 0, "输出文件夹", _outputFolder, "", BrowseOutputButton());
 
         ConfigureNumber(_fps, 0, 240, 0); _fps.Width = 140;
         ConfigureNumber(_width, 0, 8192, 0); _width.Increment = 16;
@@ -187,15 +215,12 @@ internal sealed class MainForm : Form
         return group;
     }
 
-    private Control BuildFooter()
+    private Control BuildFooter() => new Label
     {
-        return new Label
-        {
-            AutoSize = true,
-            Text = "就绪 · MP4/WebM → QAnimator .bytes → Unity Custom Decoder（不使用 VideoPlayer）",
-            Padding = new Padding(0, 5, 0, 0),
-        };
-    }
+        AutoSize = true,
+        Text = "就绪 · MP4/WebM → QAnimator .bytes → Unity Texture2D（Runtime 不使用 VideoPlayer / FFmpeg）",
+        Padding = new Padding(0, 5, 0, 0),
+    };
 
     private async void AddFiles(object? sender, EventArgs e)
     {
@@ -223,7 +248,7 @@ internal sealed class MainForm : Form
                 VideoInfo info = await FfmpegTools.ProbeAsync(path, CancellationToken.None);
                 job.SourceInfo = info;
                 job.Status = "等待";
-                AppendLog($"已添加: {Path.GetFileName(path)} · {info.Width}x{info.Height} · {info.Fps:0.##} FPS · alpha={info.HasAlpha}");
+                AppendLog($"已添加: {Path.GetFileName(path)} · {info.Width}x{info.Height} · {info.Fps:0.##} FPS · {info.CodecName} · alpha={info.HasAlpha}");
             }
             catch (Exception ex)
             {
@@ -239,6 +264,12 @@ internal sealed class MainForm : Form
     {
         if (_cts != null || _jobs.Count == 0)
             return;
+
+        if (string.IsNullOrWhiteSpace(_outputFolder.Text))
+        {
+            MessageBox.Show(this, "请选择输出文件夹。", "QAnimator", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
 
         Directory.CreateDirectory(_outputFolder.Text);
         _cts = new CancellationTokenSource();
@@ -280,12 +311,14 @@ internal sealed class MainForm : Form
         job.OutputPath = output;
         job.Status = "处理中";
         job.Progress = 0;
+        job.Error = null;
         RefreshGrid();
         AppendLog($"开始: {job.InputPath} -> {output}");
 
+        using var ffmpeg = FfmpegTools.StartRgbaDecode(job.InputPath, width, height, fps, source.CodecName, hasAlpha);
+        Task ffmpegCompletion = FfmpegTools.EnsureSuccessAsync(ffmpeg, cancellationToken);
         try
         {
-            using var ffmpeg = FfmpegTools.StartRgbaDecode(job.InputPath, width, height, fps);
             double estimatedFrames = source.Duration > 0 ? Math.Max(1, source.Duration * fps) : 1;
             var progress = new Progress<double>(frameNumber =>
             {
@@ -305,7 +338,7 @@ internal sealed class MainForm : Form
 
             var encoder = new QAnimatorEncoder();
             await encoder.EncodeAsync(ffmpeg.StandardOutput.BaseStream, output, settings, progress, cancellationToken);
-            await FfmpegTools.EnsureSuccessAsync(ffmpeg, cancellationToken);
+            await ffmpegCompletion;
 
             job.Status = "完成";
             job.Progress = 1;
@@ -313,12 +346,16 @@ internal sealed class MainForm : Form
         }
         catch (OperationCanceledException)
         {
+            FfmpegTools.TryKill(ffmpeg);
+            try { await ffmpegCompletion; } catch { }
             job.Status = "已停止";
             TryDelete(job.OutputPath);
             AppendLog($"已停止: {Path.GetFileName(job.InputPath)}");
         }
         catch (Exception ex)
         {
+            FfmpegTools.TryKill(ffmpeg);
+            try { await ffmpegCompletion; } catch { }
             job.Status = "失败";
             job.Error = ex.Message;
             TryDelete(job.OutputPath);
@@ -356,7 +393,8 @@ internal sealed class MainForm : Form
             EncodeJob j = _jobs[i];
             string resolution = j.SourceInfo == null ? "-" : $"{j.SourceInfo.Width}x{j.SourceInfo.Height}";
             string fps = j.SourceInfo == null ? "-" : j.SourceInfo.Fps.ToString("0.##");
-            _grid.Rows.Add(i + 1, Path.GetFileName(j.InputPath), resolution, fps,
+            string alpha = j.SourceInfo == null ? "-" : (j.SourceInfo.HasAlpha ? "Yes" : "No");
+            _grid.Rows.Add(i + 1, Path.GetFileName(j.InputPath), resolution, fps, alpha,
                 string.IsNullOrEmpty(j.OutputPath) ? "-" : Path.GetFileName(j.OutputPath),
                 j.Status, $"{j.Progress * 100:0}%");
         }
@@ -378,15 +416,12 @@ internal sealed class MainForm : Form
         _log.AppendText($"[{DateTime.Now:HH:mm:ss}] {text}{Environment.NewLine}");
     }
 
-    private Button BrowseOutputButton()
+    private Button BrowseOutputButton() => Button("浏览...", (_, _) =>
     {
-        var button = Button("浏览...", (_, _) =>
-        {
-            using var dialog = new FolderBrowserDialog { SelectedPath = _outputFolder.Text };
-            if (dialog.ShowDialog(this) == DialogResult.OK) _outputFolder.Text = dialog.SelectedPath;
-        });
-        return button;
-    }
+        using var dialog = new FolderBrowserDialog { SelectedPath = _outputFolder.Text };
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+            _outputFolder.Text = dialog.SelectedPath;
+    });
 
     private static GroupBox Group(string text) => new() { Text = text, Dock = DockStyle.Fill, Padding = new Padding(8) };
 
@@ -412,9 +447,6 @@ internal sealed class MainForm : Form
         grid.Controls.Add(new Label { Text = label2, AutoSize = true, Anchor = AnchorStyles.Left }, 2, row);
         grid.Controls.Add(control2, 3, row);
     }
-
-    private static void AddRow(TableLayoutPanel grid, int row, string label1, Control control1, string label2, Control control2)
-        => AddPair(grid, row, label1, control1, label2, control2);
 
     private CompressionLevel SelectedCompressionLevel() => _compression.SelectedItem?.ToString() switch
     {
