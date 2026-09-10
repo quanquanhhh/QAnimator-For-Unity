@@ -68,16 +68,19 @@ namespace QAnimator.Unity
             if (targetFrame == _decodedFrame)
                 return;
 
-            if (_decodedFrame >= 0 && targetFrame > _decodedFrame)
+            int key = _frames[targetFrame].NearestKeyFrame;
+            if ((uint)key >= (uint)_frames.Length || key > targetFrame || _frames[key].Type != QFrameType.Key)
+                throw new InvalidDataException("Invalid nearest key-frame index.");
+
+            // For normal playback, applying the next delta(s) is cheapest. If Unity skips
+            // far ahead and there is a newer key frame between the decoded frame and target,
+            // jump to it instead of reconstructing every skipped delta frame.
+            if (_decodedFrame >= 0 && targetFrame > _decodedFrame && key <= _decodedFrame)
             {
                 for (int i = _decodedFrame + 1; i <= targetFrame; i++)
                     DecodeSingle(i);
                 return;
             }
-
-            int key = _frames[targetFrame].NearestKeyFrame;
-            if ((uint)key >= (uint)_frames.Length || key > targetFrame || _frames[key].Type != QFrameType.Key)
-                throw new InvalidDataException("Invalid nearest key-frame index.");
 
             DecodeSingle(key);
             for (int i = key + 1; i <= targetFrame; i++)
@@ -105,7 +108,6 @@ namespace QAnimator.Unity
             if (total != entry.UncompressedLength)
                 throw new InvalidDataException($"Frame {frameIndex} decompressed to {total} bytes; expected {entry.UncompressedLength}.");
 
-            // A valid payload must end exactly at the declared uncompressed size.
             if (deflate.ReadByte() != -1)
                 throw new InvalidDataException($"Frame {frameIndex} expands beyond its declared payload size.");
 
