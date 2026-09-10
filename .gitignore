@@ -1,0 +1,45 @@
+# Unity generated
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+UserSettings/
+MemoryCaptures/
+Recordings/
+
+# Unity IDE / generated
+.vs/
+.idea/
+.gradle/
+ExportedObj/
+*.csproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# Keep the hand-authored Encoder project file
+!Encoder/QAnimator.Encoder.csproj
+!Tests/QAnimator.CodecSmoke/QAnimator.CodecSmoke.csproj
+
+# .NET build output
+**/bin/
+**/obj/
+
+# QAnimator encoder temporary/output files
+*.frames.tmp
+*.output.tmp
+
+# OS
+.DS_Store
+Thumbs.db
