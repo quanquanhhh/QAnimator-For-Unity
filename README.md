@@ -1,62 +1,194 @@
 # QAnimator for Unity
 
-QAnimator is a lightweight custom 2D animation codec for Unity.
+QAnimator is a lightweight custom 2D animation codec and runtime for **Unity 6 / Unity 6000**.
 
-It converts `MP4/WebM -> .bytes` offline and plays the resulting binary directly in Unity without `VideoPlayer` or runtime FFmpeg.
+It converts `MP4/WebM -> QAnimator .bytes` offline, then Unity decodes that custom binary directly into a reusable `Texture2D`.
 
-> Full requirements: see [SPEC.md](SPEC.md).
+**QAnimator Runtime does not use Unity `VideoPlayer`, FFmpeg, temporary MP4/WebM files, or the OS video decoder.**
 
-## Current repository layout
+> Full product and technical requirements: [SPEC.md](SPEC.md)
+
+## Pipeline
+
+```text
+Authoring / PC only
+MP4 or WebM
+    -> FFmpeg decode to RGBA
+    -> QAnimator Encoder
+    -> QANM .bytes
+
+Unity runtime
+QANM .bytes
+    -> QAnimatorDecoder
+    -> RGBA frame buffer
+    -> reusable Texture2D
+    -> RawImage / SpriteRenderer
+```
+
+## Repository layout
 
 ```text
 Encoder/                 Windows encoder (WinForms, .NET 8)
-Unity/Runtime/           Unity runtime decoder/player source
-.github/workflows/       Encoder build verification
+Tests/QAnimator.CodecSmoke/
+                         codec round-trip / validator tests
+Unity/Runtime/           Unity runtime player + output adapters
+Unity/package.json       Unity 6000 UPM package manifest
+.github/workflows/       build + end-to-end conversion validation
 ```
 
 ## Encoder
 
-Requirements for local use:
+### Requirements
 
-- Windows
-- .NET 8 SDK
-- `ffmpeg.exe` and `ffprobe.exe` available on PATH, or placed next to the encoder executable
+For source video conversion, the encoder needs `ffmpeg.exe` and `ffprobe.exe` either:
 
-Build:
+- next to `QAnimator.Encoder.exe`, or
+- available on `PATH`.
+
+FFmpeg is **only an authoring dependency**. It is never needed by the Unity runtime/player.
+
+### Build
 
 ```powershell
 dotnet build Encoder/QAnimator.Encoder.csproj -c Release
 ```
 
-The encoder UI supports MP4/WebM input, `.bytes` output, queue processing, FPS override, resizing, key-frame interval, block size, compression level, and alpha-preserving RGBA decode.
+### GUI
 
-## Unity runtime
+Launch the encoder with no command-line arguments. The WinForms UI supports:
 
-Copy `Unity/Runtime` into a Unity project, or later package it as a UPM package.
+- drag/drop and multi-file MP4/WebM queue;
+- output folder selection;
+- source or overridden FPS;
+- source or overridden width/height;
+- key-frame interval;
+- block size;
+- compression level;
+- alpha preservation;
+- start/stop/clear controls;
+- per-job and overall progress;
+- conversion logs.
 
-Typical usage:
+### CLI
+
+The same executable also exposes a headless path used by CI:
+
+```powershell
+dotnet run --project Encoder/QAnimator.Encoder.csproj -c Release -- `
+  --input input.webm `
+  --output output.bytes `
+  --fps 30 `
+  --key-interval 15 `
+  --block-size 16
+```
+
+Optional arguments:
+
+```text
+--fps N
+--width N
+--height N
+--key-interval N
+--block-size N
+--compression fastest|optimal|smallest
+--no-alpha
+```
+
+## QANM v1 codec
+
+The current MVP uses:
+
+- `RGBA32` pixels;
+- full RGBA key frames;
+- changed-block delta frames;
+- configurable block size (default `16x16`);
+- independent per-frame Deflate compression;
+- a frame index with byte offsets and nearest key frame;
+- seek by rebuilding from the nearest key frame.
+
+The format is versioned so a future codec/compression implementation can be added without pretending an MP4/WebM is a QAnimator file.
+
+## Unity 6000 integration
+
+### Option A — copy Runtime
+
+Copy `Unity/Runtime` into your Unity project's `Assets` folder.
+
+### Option B — Git UPM package
+
+In Package Manager, add the repository as a Git package with the `Unity` subfolder:
+
+```text
+https://github.com/quanquanhhh/QAnimator-For-Unity.git?path=/Unity
+```
+
+The package targets Unity `6000.0` and depends on UGUI for the optional `RawImage` adapter.
+
+### Basic usage
 
 ```csharp
-[SerializeField] private TextAsset animationData;
-[SerializeField] private QAnimatorPlayer player;
+using QAnimator.Unity;
+using UnityEngine;
 
-private void Start()
+public sealed class Demo : MonoBehaviour
 {
-    player.Load(animationData.bytes);
-    player.Play();
+    [SerializeField] private TextAsset animationData;
+    [SerializeField] private QAnimatorPlayer player;
+
+    private void Start()
+    {
+        player.Load(animationData.bytes);
+        player.Loop = true;
+        player.Play();
+    }
 }
 ```
 
-The runtime intentionally does not reference `UnityEngine.Video.VideoPlayer`.
+`QAnimatorPlayer.Texture` is the reusable playback texture.
 
-## Status
+For UGUI, place `QAnimatorPlayer` and `QAnimatorRawImageOutput` on the same object as a `RawImage` (or assign the player reference manually).
 
-This repository starts with a v1 MVP codec:
+For world-space 2D, use `QAnimatorSpriteRendererOutput` with a `SpriteRenderer`.
 
-- RGBA32 key frames
-- 16x16-style block delta frames (configurable)
-- per-frame Deflate compression
-- indexed frame access
-- reusable Unity texture and decode buffers
+### Runtime controls
 
-The format is versioned so compression/codecs can be upgraded later.
+```csharp
+player.Play();
+player.Pause();
+player.Resume();
+player.Stop();
+player.Restart();
+player.Seek(0.5f);
+player.Speed = 1.0f;
+player.Loop = true;
+```
+
+Completion callback:
+
+```csharp
+player.OnComplete += HandleComplete;
+```
+
+## Automated verification
+
+GitHub Actions validates more than compilation. CI currently performs:
+
+1. Encoder build.
+2. Pure RGBA codec round-trip tests, including odd dimensions and unchanged frames.
+3. Forward and backward seek reconstruction tests.
+4. Synthetic MP4 generation with FFmpeg.
+5. Real MP4 -> QAnimator `.bytes` conversion through the encoder CLI.
+6. Full decode validation of the generated `.bytes`.
+7. Transparent VP9 WebM conversion and alpha/pixel preservation checks.
+8. Self-contained Windows x64 publish and artifact upload.
+
+## Current limitations
+
+This is the v0.1 MVP, not a general movie codec. In particular:
+
+- source fractional FPS is currently rounded to an integer output FPS unless explicitly overridden;
+- frame decompression currently uses managed `DeflateStream` and therefore is not yet a zero-allocation decoder;
+- Unity runtime still requires real Unity 6000 Editor/device validation before the first release is considered production-ready;
+- FFmpeg binaries are not committed to this repository.
+
+The next optimization target after functional Unity validation is runtime decode allocation/CPU profiling on real short 2D animations.
