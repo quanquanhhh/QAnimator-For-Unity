@@ -24,8 +24,7 @@ internal static class EncoderCli
             throw new FileNotFoundException("Input video not found.", input);
 
         VideoInfo source = await FfmpegTools.ProbeAsync(input, CancellationToken.None);
-        int width = options.Width > 0 ? options.Width : source.Width;
-        int height = options.Height > 0 ? options.Height : source.Height;
+        (int width, int height) = ResolveOutputSize(source.Width, source.Height, options.Width, options.Height);
         int fps = options.Fps > 0 ? options.Fps : Math.Max(1, (int)Math.Round(source.Fps));
         bool hasAlpha = options.PreserveAlpha && source.HasAlpha;
 
@@ -58,6 +57,22 @@ internal static class EncoderCli
 
         Console.WriteLine($"QAnimator: wrote {output} ({new FileInfo(output).Length:N0} bytes)");
         return 0;
+    }
+
+    private static (int Width, int Height) ResolveOutputSize(int sourceWidth, int sourceHeight, int requestedWidth, int requestedHeight)
+    {
+        if (requestedWidth <= 0 && requestedHeight <= 0)
+            return (sourceWidth, sourceHeight);
+        if (requestedWidth > 0 && requestedHeight > 0)
+            return (requestedWidth, requestedHeight);
+        if (requestedWidth > 0)
+        {
+            int height = Math.Max(1, (int)Math.Round(sourceHeight * (requestedWidth / (double)sourceWidth)));
+            return (requestedWidth, height);
+        }
+
+        int width = Math.Max(1, (int)Math.Round(sourceWidth * (requestedHeight / (double)sourceHeight)));
+        return (width, requestedHeight);
     }
 
     private static Options Parse(string[] args)
@@ -112,8 +127,8 @@ internal static class EncoderCli
         Console.WriteLine();
         Console.WriteLine("Options:");
         Console.WriteLine("  --fps N             Output FPS; default = rounded source FPS");
-        Console.WriteLine("  --width N           Output width; default = source width");
-        Console.WriteLine("  --height N          Output height; default = source height");
+        Console.WriteLine("  --width N           Output width; setting only one dimension preserves aspect ratio");
+        Console.WriteLine("  --height N          Output height; setting only one dimension preserves aspect ratio");
         Console.WriteLine("  --key-interval N    Key-frame interval; default = 15");
         Console.WriteLine("  --block-size N      Delta block size; default = 16");
         Console.WriteLine("  --compression NAME  fastest|optimal|smallest; default = optimal");
