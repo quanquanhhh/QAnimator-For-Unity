@@ -32,6 +32,7 @@ internal static class EncoderCli
         Console.WriteLine($"QAnimator: {Path.GetFileName(input)} {source.Width}x{source.Height} {source.Fps:0.###}fps -> {width}x{height} {fps}fps alpha={hasAlpha}");
 
         using var ffmpeg = FfmpegTools.StartRgbaDecode(input, width, height, fps, source.CodecName, hasAlpha);
+        Task ffmpegCompletion = FfmpegTools.EnsureSuccessAsync(ffmpeg, CancellationToken.None);
         try
         {
             var settings = new EncodeSettings(
@@ -45,11 +46,12 @@ internal static class EncoderCli
 
             var encoder = new QAnimatorEncoder();
             await encoder.EncodeAsync(ffmpeg.StandardOutput.BaseStream, output, settings, progress: null, CancellationToken.None);
-            await FfmpegTools.EnsureSuccessAsync(ffmpeg, CancellationToken.None);
+            await ffmpegCompletion;
         }
         catch
         {
             FfmpegTools.TryKill(ffmpeg);
+            try { await ffmpegCompletion; } catch { }
             try { if (File.Exists(output)) File.Delete(output); } catch { }
             throw;
         }
