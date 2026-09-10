@@ -21,6 +21,7 @@ namespace QAnimator.Unity
 
         public event Action OnComplete;
         public event Action<Texture2D> OnTextureCreated;
+        public event Action OnTextureReleased;
 
         public bool Loop
         {
@@ -109,7 +110,7 @@ namespace QAnimator.Unity
             _time = 0f;
             _currentFrame = -1;
             _decoder = null;
-            DisposeTexture();
+            DisposeTexture(notify: true);
 
             var decoder = new QAnimatorDecoder(data);
             var texture = new Texture2D(decoder.Width, decoder.Height, TextureFormat.RGBA32, mipChain: false, linear: false)
@@ -131,7 +132,7 @@ namespace QAnimator.Unity
             _time = 0f;
             _currentFrame = -1;
             _decoder = null;
-            DisposeTexture();
+            DisposeTexture(notify: true);
         }
 
         public void Play()
@@ -150,9 +151,8 @@ namespace QAnimator.Unity
         public void Resume()
         {
             EnsureLoaded();
-            if (_time >= Duration)
-                return;
-            _isPlaying = true;
+            if (_time < Duration)
+                _isPlaying = true;
         }
 
         public void Stop()
@@ -213,12 +213,14 @@ namespace QAnimator.Unity
         private void OnDestroy()
         {
             _decoder = null;
-            DisposeTexture();
+            DisposeTexture(notify: true);
         }
 
-        private void DisposeTexture()
+        private void DisposeTexture(bool notify)
         {
             if (_texture == null) return;
+            if (notify)
+                OnTextureReleased?.Invoke();
 #if UNITY_EDITOR
             if (!Application.isPlaying)
                 DestroyImmediate(_texture);
