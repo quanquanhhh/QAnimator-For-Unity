@@ -17,7 +17,33 @@ internal static class FfmpegTools
     public static string ResolveTool(string fileName)
     {
         string local = Path.Combine(AppContext.BaseDirectory, fileName);
-        return File.Exists(local) ? local : fileName;
+        if (File.Exists(local))
+            return local;
+
+        string? path = Environment.GetEnvironmentVariable("PATH");
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            foreach (string rawDirectory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string directory = rawDirectory.Trim().Trim('"');
+                if (directory.Length == 0)
+                    continue;
+                try
+                {
+                    string candidate = Path.Combine(directory, fileName);
+                    if (File.Exists(candidate))
+                        return candidate;
+                }
+                catch
+                {
+                    // Ignore malformed PATH entries and continue searching.
+                }
+            }
+        }
+
+        throw new FileNotFoundException(
+            $"{fileName} was not found. Put ffmpeg.exe and ffprobe.exe next to QAnimatorEncoder.exe, or add their folder to PATH.",
+            fileName);
     }
 
     public static async Task<VideoInfo> ProbeAsync(string inputPath, CancellationToken cancellationToken)
@@ -34,8 +60,11 @@ internal static class FfmpegTools
                 values[raw[..eq].Trim()] = raw[(eq + 1)..].Trim();
         }
 
-        int width = int.Parse(values["width"], CultureInfo.InvariantCulture);
-        int height = int.Parse(values["height"], CultureInfo.InvariantCulture);
+        if (!values.TryGetValue("width", out string? widthText) || !values.TryGetValue("height", out string? heightText))
+            throw new InvalidDataException("ffprobe did not return a valid video stream width/height.");
+
+        int width = int.Parse(widthText, CultureInfo.InvariantCulture);
+        int height = int.Parse(heightText, CultureInfo.InvariantCulture);
         double fps = ParseRate(values.GetValueOrDefault("avg_frame_rate") ?? "30/1");
         double duration = double.TryParse(values.GetValueOrDefault("duration"), NumberStyles.Float, CultureInfo.InvariantCulture, out double d) ? d : 0;
         string pixelFormat = values.GetValueOrDefault("pix_fmt") ?? string.Empty;
@@ -124,7 +153,7 @@ internal static class FfmpegTools
         string stdout = await stdoutTask;
         string stderr = await stderrTask;
         if (process.ExitCode != 0)
-            throw new InvalidOperationException($"{fileName} failed: {stderr}");
+            throw new InvalidOperationException($"{Path.GetFileName(fileName)} failed: {stderr}");
         return stdout;
     }
 
@@ -134,7 +163,7 @@ internal static class FfmpegTools
         if (pieces.Length == 2 && double.TryParse(pieces[0], NumberStyles.Float, CultureInfo.InvariantCulture, out double n) &&
             double.TryParse(pieces[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double d) && d != 0)
             return n / d;
-        return double.TryParse(rate, NumberStyles.Float, CultureInfo.InvariantCulture, out double direct) ? direct : 30;
+        return double.TryParse(rate, NumberStyles.Float, CultureInfo.InvariantCulture, out double direct) && direct > 0 ? direct : 30;
     }
 
     private static bool PixelFormatHasAlpha(string pixelFormat)
