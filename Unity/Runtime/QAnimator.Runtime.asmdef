@@ -2,7 +2,7 @@
   "name": "QAnimator.Runtime",
   "rootNamespace": "QAnimator.Unity",
   "references": [
-    "Unity.ugui"
+    "UnityEngine.UI"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

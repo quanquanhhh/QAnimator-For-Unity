@@ -8,4 +8,8 @@
     <RootNamespace>QAnimator.Encoder</RootNamespace>
     <AssemblyName>QAnimatorEncoder</AssemblyName>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../Unity/Runtime/QAnimatorDecoder.cs" Link="Preview/QAnimatorDecoder.cs" />
+    <Compile Include="../Unity/Runtime/QAnimatorFormat.cs" Link="Preview/QAnimatorFormat.cs" />
+  </ItemGroup>
 </Project>

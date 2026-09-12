@@ -90,6 +90,17 @@ jobs:
           $decoded = (Get-FileHash artifacts/qanim-alpha-decoded.rgba -Algorithm SHA256).Hash
           if ($expected -ne $decoded) { throw "Alpha frame pixels differ after QAnimator conversion." }
 
+      - name: Compare all decoded pixels and random seeks
+        shell: pwsh
+        run: |
+          dotnet run --project Tests/QAnimator.CodecSmoke -c Release -- --integration artifacts/qanim-e2e.mp4 artifacts/qanim-e2e.bytes
+          if ($LASTEXITCODE -ne 0) { throw 'MP4 integration failed' }
+          dotnet run --project Tests/QAnimator.CodecSmoke -c Release -- --integration artifacts/qanim-alpha.webm artifacts/qanim-alpha.bytes
+          if ($LASTEXITCODE -ne 0) { throw 'Alpha integration failed' }
+
+      - name: Exercise desktop queue and preview
+        run: dotnet run --project Tests/QAnimator.DesktopSmoke -c Release -- artifacts/qanim-e2e.mp4 artifacts/desktop-smoke
+
       - name: Publish portable Windows x64 encoder
         run: dotnet publish Encoder/QAnimator.Encoder.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o artifacts/QAnimatorEncoder
 

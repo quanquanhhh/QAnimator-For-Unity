@@ -1,5 +1,10 @@
 # QAnimator for Unity
 
+**本地试用：** 双击 `启动编码器.cmd`。中文操作步骤、Unity 6 接入和宝箱素材说明见 [使用说明.md](使用说明.md)，实际验证结果见 [TEST_REPORT.md](TEST_REPORT.md)。
+
+v0.2 adds transactional video conversion, protected queue output naming, real `.bytes` preview, and a Unity demo creation menu.
+
+
 QAnimator is a lightweight custom 2D animation codec and runtime for **Unity 6 / Unity 6000**.
 
 It converts `MP4/WebM -> QAnimator .bytes` offline, then Unity decodes that custom binary directly into a reusable `Texture2D`.
@@ -184,11 +189,11 @@ GitHub Actions validates more than compilation. CI currently performs:
 
 ## Current limitations
 
-This is the v0.1 MVP, not a general movie codec. In particular:
+This is the v0.2 preview, not a general movie codec. In particular:
 
 - source fractional FPS is currently rounded to an integer output FPS unless explicitly overridden;
 - frame decompression currently uses managed `DeflateStream` and therefore is not yet a zero-allocation decoder;
-- Unity runtime still requires real Unity 6000 Editor/device validation before the first release is considered production-ready;
+- Unity 6000.0.61f1 Editor validation now passes 25 checks; standalone/device/IL2CPP validation remains pending;
 - FFmpeg binaries are not committed to this repository.
 
 The next optimization target after functional Unity validation is runtime decode allocation/CPU profiling on real short 2D animations.

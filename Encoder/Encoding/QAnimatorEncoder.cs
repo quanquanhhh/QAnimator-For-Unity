@@ -61,6 +61,9 @@ internal sealed class QAnimatorEncoder
                     if (read != frameBytes)
                         throw new InvalidDataException($"Incomplete RGBA frame: {read}/{frameBytes} bytes.");
 
+                    if (!settings.HasAlpha)
+                        for (int pixel = 3; pixel < current.Length; pixel += 4) current[pixel] = 255;
+
                     bool isKey = frameIndex == 0 || frameIndex % settings.KeyFrameInterval == 0;
                     QFrameType type = isKey ? QFrameType.Key : QFrameType.Delta;
                     byte[] rawPayload;
@@ -68,7 +71,7 @@ internal sealed class QAnimatorEncoder
                     if (isKey)
                     {
                         nearestKey = frameIndex;
-                        rawPayload = current.AsSpan().ToArray();
+                        rawPayload = current;
                     }
                     else
                     {

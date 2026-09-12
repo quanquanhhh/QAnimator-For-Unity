@@ -40,8 +40,8 @@ namespace QAnimator.Unity
                 throw new InvalidDataException("QAnimator delta payload limit exceeds supported memory range.");
             int maxDeltaPayload = (int)maxDeltaPayloadLong;
 
-            _frames = new QFrameIndexEntry[_header.FrameCount];
             ValidateTopLevelOffsets(data.LongLength);
+            _frames = new QFrameIndexEntry[_header.FrameCount];
 
             stream.Position = _header.FrameIndexOffset;
             int maxPayload = 0;

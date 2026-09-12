@@ -22,10 +22,13 @@ internal sealed class MainForm : Form
     private readonly Button _stopButton = new();
     private readonly List<EncodeJob> _jobs = new();
     private CancellationTokenSource? _cts;
+    private Control? _settingsGroup;
+    private int _probing;
+    private bool _closeAfterStop;
 
     public MainForm()
     {
-        Text = "QAnimator Encoder v0.1";
+        Text = "QAnimator Encoder v0.2 · Unity 6";
         Width = 1120;
         Height = 900;
         MinimumSize = new Size(960, 720);
@@ -36,7 +39,13 @@ internal sealed class MainForm : Form
         AllowDrop = true;
         DragEnter += OnDragEnter;
         DragDrop += OnDragDrop;
-        FormClosing += (_, _) => _cts?.Cancel();
+        FormClosing += (_, e) =>
+        {
+            if (_cts == null) return;
+            e.Cancel = true;
+            _closeAfterStop = true;
+            _cts.Cancel();
+        };
 
         BuildUi();
         ApplyDarkTheme(this);
@@ -62,7 +71,8 @@ internal sealed class MainForm : Form
         root.Controls.Add(BuildTaskGroup(), 0, 0);
         root.Controls.Add(BuildProgressPanel(), 0, 1);
         root.Controls.Add(BuildActionPanel(), 0, 2);
-        root.Controls.Add(BuildSettingsGroup(), 0, 3);
+        _settingsGroup = BuildSettingsGroup();
+        root.Controls.Add(_settingsGroup, 0, 3);
         root.Controls.Add(BuildLogGroup(), 0, 4);
         root.Controls.Add(BuildFooter(), 0, 5);
     }
@@ -86,6 +96,7 @@ internal sealed class MainForm : Form
         _grid.Columns.Add("Output", "输出文件");
         _grid.Columns.Add("Status", "状态");
         _grid.Columns.Add("Progress", "进度");
+        foreach (DataGridViewColumn column in _grid.Columns) column.SortMode = DataGridViewColumnSortMode.NotSortable;
         _grid.Columns[0].FillWeight = 30;
         _grid.Columns[1].FillWeight = 145;
         _grid.Columns[2].FillWeight = 70;
@@ -117,6 +128,13 @@ internal sealed class MainForm : Form
     {
         var panel = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, Padding = new Padding(0, 4, 0, 8) };
         panel.Controls.Add(Button("添加文件", AddFiles));
+        panel.Controls.Add(Button("预览 .bytes", (_, _) =>
+        {
+            using var dialog = new OpenFileDialog { Filter = "QAnimator|*.bytes", InitialDirectory = _outputFolder.Text };
+            if (dialog.ShowDialog(this) != DialogResult.OK) return;
+            try { new PreviewForm(dialog.FileName).Show(this); }
+            catch (Exception ex) { AppendLog($"预览失败: {ex.Message}"); }
+        }));
         panel.Controls.Add(Button("移除选中任务", RemoveSelected));
         panel.Controls.Add(Button("清除完成", ClearFinished));
         panel.Controls.Add(Button("清除全部", (_, _) =>
@@ -154,6 +172,7 @@ internal sealed class MainForm : Form
         _stopButton.Text = "停止所有任务";
         _stopButton.AutoSize = true;
         _stopButton.Padding = new Padding(8, 2, 8, 2);
+        _stopButton.ForeColor = Color.WhiteSmoke;
         _stopButton.Enabled = false;
         _stopButton.Click += (_, _) => _cts?.Cancel();
         panel.Controls.Add(_stopButton);
@@ -235,34 +254,40 @@ internal sealed class MainForm : Form
 
     private async Task AddPathsAsync(IEnumerable<string> paths)
     {
-        foreach (string path in paths.Where(IsSupportedInput))
+        if (_cts != null) { AppendLog("请在当前批次结束后添加文件。"); return; }
+        _probing++;
+        try
         {
-            if (_jobs.Any(j => string.Equals(j.InputPath, path, StringComparison.OrdinalIgnoreCase)))
-                continue;
+            foreach (string path in paths.Where(IsSupportedInput))
+            {
+                if (_jobs.Any(j => string.Equals(j.InputPath, path, StringComparison.OrdinalIgnoreCase)))
+                    continue;
 
-            var job = new EncodeJob { InputPath = path, Status = "分析中" };
-            _jobs.Add(job);
-            RefreshGrid();
-            try
-            {
-                VideoInfo info = await FfmpegTools.ProbeAsync(path, CancellationToken.None);
-                job.SourceInfo = info;
-                job.Status = "等待";
-                AppendLog($"已添加: {Path.GetFileName(path)} · {info.Width}x{info.Height} · {info.Fps:0.##} FPS · {info.CodecName} · alpha={info.HasAlpha}");
+                var job = new EncodeJob { InputPath = path, Status = "分析中" };
+                _jobs.Add(job);
+                RefreshGrid();
+                try
+                {
+                    VideoInfo info = await FfmpegTools.ProbeAsync(path, CancellationToken.None);
+                    job.SourceInfo = info;
+                    job.Status = "等待";
+                    AppendLog($"已添加: {Path.GetFileName(path)} · {info.Width}x{info.Height} · {info.Fps:0.##} FPS · {info.CodecName} · alpha={info.HasAlpha}");
+                }
+                catch (Exception ex)
+                {
+                    job.Status = "分析失败";
+                    job.Error = ex.Message;
+                    AppendLog($"分析失败 {path}: {ex.Message}");
+                }
+                RefreshGrid();
             }
-            catch (Exception ex)
-            {
-                job.Status = "分析失败";
-                job.Error = ex.Message;
-                AppendLog($"分析失败 {path}: {ex.Message}");
-            }
-            RefreshGrid();
         }
+        finally { _probing--; }
     }
 
     private async void StartAll(object? sender, EventArgs e)
     {
-        if (_cts != null || _jobs.Count == 0)
+        if (_cts != null || _jobs.Count == 0 || _probing > 0)
             return;
 
         if (string.IsNullOrWhiteSpace(_outputFolder.Text))
@@ -271,14 +296,16 @@ internal sealed class MainForm : Form
             return;
         }
 
-        Directory.CreateDirectory(_outputFolder.Text);
+        try { Directory.CreateDirectory(_outputFolder.Text); }
+        catch (Exception ex) { AppendLog($"输出目录不可用: {ex.Message}"); return; }
+        _settingsGroup!.Enabled = false;
         _cts = new CancellationTokenSource();
         _startButton.Enabled = false;
         _stopButton.Enabled = true;
 
         try
         {
-            foreach (EncodeJob job in _jobs.Where(j => j.Status is "等待" or "失败" or "已停止"))
+            foreach (EncodeJob job in _jobs.Where(j => j.Status is "等待" or "失败" or "已停止").ToArray())
             {
                 if (_cts.IsCancellationRequested)
                     break;
@@ -291,7 +318,9 @@ internal sealed class MainForm : Form
             _cts = null;
             _startButton.Enabled = true;
             _stopButton.Enabled = false;
+            _settingsGroup!.Enabled = true;
             UpdateOverallProgress();
+            if (_closeAfterStop) Close();
         }
     }
 
@@ -301,13 +330,15 @@ internal sealed class MainForm : Form
             return;
 
         VideoInfo source = job.SourceInfo;
-        int width = (int)_width.Value > 0 ? (int)_width.Value : source.Width;
-        int height = (int)_height.Value > 0 ? (int)_height.Value : source.Height;
+        (int width, int height) = VideoConversion.ResolveSize(source.Width, source.Height, (int)_width.Value, (int)_height.Value);
         int fps = (int)_fps.Value > 0 ? (int)_fps.Value : Math.Max(1, (int)Math.Round(source.Fps));
         int keyInterval = (int)_keyInterval.Value;
         int blockSize = (int)_blockSize.Value;
         bool hasAlpha = _preserveAlpha.Checked && source.HasAlpha;
         string output = Path.Combine(_outputFolder.Text, Path.GetFileNameWithoutExtension(job.InputPath) + ".bytes");
+        string stem = Path.GetFileNameWithoutExtension(job.InputPath);
+        for (int suffix = 2; File.Exists(output) || _jobs.Any(j => j != job && string.Equals(j.OutputPath, output, StringComparison.OrdinalIgnoreCase)); suffix++)
+            output = Path.Combine(_outputFolder.Text, $"{stem}_{suffix}.bytes");
         job.OutputPath = output;
         job.Status = "处理中";
         job.Progress = 0;
@@ -315,13 +346,16 @@ internal sealed class MainForm : Form
         RefreshGrid();
         AppendLog($"开始: {job.InputPath} -> {output}");
 
-        using var ffmpeg = FfmpegTools.StartRgbaDecode(job.InputPath, width, height, fps, source.CodecName, hasAlpha);
-        Task ffmpegCompletion = FfmpegTools.EnsureSuccessAsync(ffmpeg, cancellationToken);
         try
         {
             double estimatedFrames = source.Duration > 0 ? Math.Max(1, source.Duration * fps) : 1;
+            long lastRefresh = 0;
             var progress = new Progress<double>(frameNumber =>
             {
+                if (job.Status != "处理中" || IsDisposed) return;
+                long now = Environment.TickCount64;
+                if (now - lastRefresh < 100) return;
+                lastRefresh = now;
                 job.Progress = Math.Clamp(frameNumber / estimatedFrames, 0, 0.99);
                 RefreshGrid();
                 UpdateOverallProgress();
@@ -336,9 +370,8 @@ internal sealed class MainForm : Form
                 SelectedCompressionLevel(),
                 hasAlpha);
 
-            var encoder = new QAnimatorEncoder();
-            await encoder.EncodeAsync(ffmpeg.StandardOutput.BaseStream, output, settings, progress, cancellationToken);
-            await ffmpegCompletion;
+            await Task.Run(() => VideoConversion.ConvertAsync(job.InputPath, output, source,
+                settings, progress, cancellationToken), cancellationToken);
 
             job.Status = "完成";
             job.Progress = 1;
@@ -346,19 +379,15 @@ internal sealed class MainForm : Form
         }
         catch (OperationCanceledException)
         {
-            FfmpegTools.TryKill(ffmpeg);
-            try { await ffmpegCompletion; } catch { }
             job.Status = "已停止";
-            TryDelete(job.OutputPath);
+            job.Progress = 0;
             AppendLog($"已停止: {Path.GetFileName(job.InputPath)}");
         }
         catch (Exception ex)
         {
-            FfmpegTools.TryKill(ffmpeg);
-            try { await ffmpegCompletion; } catch { }
             job.Status = "失败";
+            job.Progress = 0;
             job.Error = ex.Message;
-            TryDelete(job.OutputPath);
             AppendLog($"失败: {Path.GetFileName(job.InputPath)} · {ex.Message}");
         }
         finally
@@ -386,6 +415,7 @@ internal sealed class MainForm : Form
 
     private void RefreshGrid()
     {
+        if (IsDisposed) return;
         if (InvokeRequired) { BeginInvoke(RefreshGrid); return; }
         _grid.Rows.Clear();
         for (int i = 0; i < _jobs.Count; i++)
@@ -412,6 +442,7 @@ internal sealed class MainForm : Form
 
     private void AppendLog(string text)
     {
+        if (IsDisposed) return;
         if (InvokeRequired) { BeginInvoke(() => AppendLog(text)); return; }
         _log.AppendText($"[{DateTime.Now:HH:mm:ss}] {text}{Environment.NewLine}");
     }
@@ -503,6 +534,11 @@ internal sealed class MainForm : Form
                 b.BackColor = Color.FromArgb(72, 72, 72);
                 b.ForeColor = Color.WhiteSmoke;
                 b.FlatStyle = FlatStyle.Flat;
+            }
+            else if (c is TextBox or NumericUpDown or ComboBox)
+            {
+                c.BackColor = Color.FromArgb(30, 33, 40);
+                c.ForeColor = Color.WhiteSmoke;
             }
             else
             {

@@ -8,6 +8,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../../Encoder/Encoding/VideoConversion.cs" Link="Encoder/VideoConversion.cs" />
+    <Compile Include="../../Encoder/Ffmpeg/FfmpegTools.cs" Link="Encoder/FfmpegTools.cs" />
     <Compile Include="../../Encoder/Format/QAnimatorFormat.cs" Link="Encoder/QAnimatorFormat.cs" />
     <Compile Include="../../Encoder/Encoding/QAnimatorEncoder.cs" Link="Encoder/QAnimatorEncoder.cs" />
     <Compile Include="../../Unity/Runtime/QAnimatorFormat.cs" Link="Unity/QAnimatorFormat.cs" />

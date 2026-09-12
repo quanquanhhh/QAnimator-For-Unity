@@ -1,0 +1,5 @@
+{
+  "name": "QAnimator.Editor",
+  "references": ["QAnimator.Runtime", "UnityEngine.UI"],
+  "includePlatforms": ["Editor"]
+}

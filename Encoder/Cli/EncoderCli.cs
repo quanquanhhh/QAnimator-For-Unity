@@ -24,55 +24,26 @@ internal static class EncoderCli
             throw new FileNotFoundException("Input video not found.", input);
 
         VideoInfo source = await FfmpegTools.ProbeAsync(input, CancellationToken.None);
-        (int width, int height) = ResolveOutputSize(source.Width, source.Height, options.Width, options.Height);
+        (int width, int height) = VideoConversion.ResolveSize(source.Width, source.Height, options.Width, options.Height);
         int fps = options.Fps > 0 ? options.Fps : Math.Max(1, (int)Math.Round(source.Fps));
         bool hasAlpha = options.PreserveAlpha && source.HasAlpha;
 
         Console.WriteLine($"QAnimator: {Path.GetFileName(input)} {source.Width}x{source.Height} {source.Fps:0.###}fps -> {width}x{height} {fps}fps alpha={hasAlpha}");
 
-        using var ffmpeg = FfmpegTools.StartRgbaDecode(input, width, height, fps, source.CodecName, hasAlpha);
-        Task ffmpegCompletion = FfmpegTools.EnsureSuccessAsync(ffmpeg, CancellationToken.None);
+        if (options.Fps < 0) throw new ArgumentException("FPS cannot be negative.");
+        using var cancellation = new CancellationTokenSource();
+        ConsoleCancelEventHandler handler = (_, e) => { e.Cancel = true; cancellation.Cancel(); };
+        Console.CancelKeyPress += handler;
         try
         {
-            var settings = new EncodeSettings(
-                width,
-                height,
-                fps,
-                options.KeyFrameInterval,
-                options.BlockSize,
-                options.CompressionLevel,
-                hasAlpha);
-
-            var encoder = new QAnimatorEncoder();
-            await encoder.EncodeAsync(ffmpeg.StandardOutput.BaseStream, output, settings, progress: null, CancellationToken.None);
-            await ffmpegCompletion;
+            await VideoConversion.ConvertAsync(input, output, source,
+                new EncodeSettings(width, height, fps, options.KeyFrameInterval, options.BlockSize,
+                    options.CompressionLevel, hasAlpha), null, cancellation.Token);
         }
-        catch
-        {
-            FfmpegTools.TryKill(ffmpeg);
-            try { await ffmpegCompletion; } catch { }
-            try { if (File.Exists(output)) File.Delete(output); } catch { }
-            throw;
-        }
+        finally { Console.CancelKeyPress -= handler; }
 
         Console.WriteLine($"QAnimator: wrote {output} ({new FileInfo(output).Length:N0} bytes)");
         return 0;
-    }
-
-    private static (int Width, int Height) ResolveOutputSize(int sourceWidth, int sourceHeight, int requestedWidth, int requestedHeight)
-    {
-        if (requestedWidth <= 0 && requestedHeight <= 0)
-            return (sourceWidth, sourceHeight);
-        if (requestedWidth > 0 && requestedHeight > 0)
-            return (requestedWidth, requestedHeight);
-        if (requestedWidth > 0)
-        {
-            int height = Math.Max(1, (int)Math.Round(sourceHeight * (requestedWidth / (double)sourceWidth)));
-            return (requestedWidth, height);
-        }
-
-        int width = Math.Max(1, (int)Math.Round(sourceWidth * (requestedHeight / (double)sourceHeight)));
-        return (width, requestedHeight);
     }
 
     private static Options Parse(string[] args)

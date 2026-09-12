@@ -43,3 +43,9 @@ ExportedObj/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local portable bundle, downloaded tools, and verification screenshots
+/dist/
+/tools/ffmpeg/
+/artifacts/
+!Tests/QAnimator.DesktopSmoke/QAnimator.DesktopSmoke.csproj

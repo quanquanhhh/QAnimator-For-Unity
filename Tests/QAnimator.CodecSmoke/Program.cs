@@ -2,6 +2,11 @@ using System.IO.Compression;
 using QAnimator.Encoder.Encoding;
 using QAnimator.Unity;
 
+if (args.Length == 3 && args[0] == "--integration")
+{
+    await Regression.Integration(args[1], args[2]);
+    return;
+}
 if (args.Length > 0)
 {
     if (args[0] == "--dump-frame")
@@ -28,6 +33,7 @@ await RunRoundTripCase(width: 32, height: 32, fps: 10, frameCount: 6, keyInterva
 await RunRoundTripCase(width: 37, height: 29, fps: 12, frameCount: 9, keyInterval: 4, blockSize: 16, alpha: true);
 await RunRoundTripCase(width: 23, height: 31, fps: 24, frameCount: 7, keyInterval: 2, blockSize: 7, alpha: false);
 await RunUnchangedFrameCase();
+await Regression.Core();
 
 Console.WriteLine("QAnimator codec smoke tests passed.");
 
@@ -40,6 +46,7 @@ static async Task RunRoundTripCase(int width, int height, int fps, int frameCoun
     for (int frame = 0; frame < frameCount; frame++)
     {
         byte[] pixels = new byte[frameBytes];
+        if (!alpha) for (int p = 3; p < pixels.Length; p += 4) pixels[p] = 255;
         int squareX = (frame * 3) % Math.Max(1, width - 1);
         int squareY = (frame * 2) % Math.Max(1, height - 1);
         for (int y = squareY; y < Math.Min(squareY + 8, height); y++)

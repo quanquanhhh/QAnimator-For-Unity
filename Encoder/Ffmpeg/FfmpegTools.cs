@@ -16,6 +16,9 @@ internal static class FfmpegTools
 {
     public static string ResolveTool(string fileName)
     {
+        string? configured = Environment.GetEnvironmentVariable("QANIMATOR_FFMPEG_DIR");
+        if (!string.IsNullOrWhiteSpace(configured) && File.Exists(Path.Combine(configured, fileName)))
+            return Path.Combine(configured, fileName);
         string local = Path.Combine(AppContext.BaseDirectory, fileName);
         if (File.Exists(local))
             return local;
@@ -94,9 +97,9 @@ internal static class FfmpegTools
 
         string decoderArg = preserveAlpha && string.Equals(codecName, "vp9", StringComparison.OrdinalIgnoreCase)
             ? "-c:v libvpx-vp9 "
-            : string.Empty;
+            : preserveAlpha && string.Equals(codecName, "vp8", StringComparison.OrdinalIgnoreCase) ? "-c:v libvpx " : string.Empty;
         string filterArg = $"-vf \"{string.Join(',', filters)}\" ";
-        string args = $"-hide_banner -loglevel error {decoderArg}-i \"{inputPath}\" {filterArg}-an -sn -dn -f rawvideo -pix_fmt rgba pipe:1";
+        string args = $"-hide_banner -loglevel error {decoderArg}-i \"{inputPath}\" {filterArg}-map 0:v:0 -an -sn -dn -f rawvideo -pix_fmt rgba pipe:1";
 
         var psi = new ProcessStartInfo
         {
@@ -162,7 +165,7 @@ internal static class FfmpegTools
         string[] pieces = rate.Split('/');
         if (pieces.Length == 2 && double.TryParse(pieces[0], NumberStyles.Float, CultureInfo.InvariantCulture, out double n) &&
             double.TryParse(pieces[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double d) && d != 0)
-            return n / d;
+            return n > 0 && d > 0 && double.IsFinite(n / d) ? n / d : 30;
         return double.TryParse(rate, NumberStyles.Float, CultureInfo.InvariantCulture, out double direct) && direct > 0 ? direct : 30;
     }
 
