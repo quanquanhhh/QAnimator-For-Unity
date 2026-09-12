@@ -14,19 +14,19 @@ https://github.com/quanquanhhh/QAnimator-For-Unity.git?path=/Unity
 
 ## UGUI
 
-Add these components to the same GameObject:
+Create one object below a Canvas and add:
 
-- `RawImage`
-- `QAnimatorPlayer`
-- `QAnimatorRawImageOutput`
+- `QEmoGraphic`
 
-Assign a QAnimator `.bytes` `TextAsset` to the player's Source field and optionally enable Play On Awake.
+Assign a QAnimator `.bytes` `TextAsset` to **Animation Bytes**. The first frame appears in Edit Mode, and **Auto Play** starts it in Play Mode. The component owns decoding, timing, its reusable texture, and UGUI rendering; no helper object or `RawImage` is needed.
 
 Or load from code:
 
 ```csharp
-player.Play(animationBytes);
+qEmoGraphic.Play(animationBytes);
 ```
+
+QANM v1 contains one animation per file. Optional files can be assigned under **Additional Animations**, and `Play("happy")` switches to the assigned asset named `happy`.
 
 ## SpriteRenderer
 
@@ -36,7 +36,7 @@ Add:
 - `QAnimatorPlayer`
 - `QAnimatorSpriteRendererOutput`
 
-The adapter creates one Sprite around the player's reusable Texture2D. It does not create a new Sprite every animation frame.
+This legacy adapter creates one Sprite around the player's reusable Texture2D. It does not create a new Sprite every animation frame.
 
 ## Runtime-loaded bytes
 
@@ -44,7 +44,7 @@ QAnimator is intentionally agnostic about asset delivery:
 
 ```csharp
 byte[] bytes = await DownloadOrLoadSomehow();
-player.Play(bytes);
+qEmoGraphic.Play(bytes);
 ```
 
 The bytes can therefore come from YooAsset, AssetBundle, StreamingAssets, Resources, a CDN, or any other system.

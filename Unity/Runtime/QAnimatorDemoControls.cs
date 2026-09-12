@@ -6,7 +6,7 @@ namespace QAnimator.Unity
     // Optional demo controls. Remove this component for production UI.
     public sealed class QAnimatorDemoControls : MonoBehaviour
     {
-        public QAnimatorPlayer Player;
+        public QEmoGraphic Player;
         private int _completions;
 
         private void Start()

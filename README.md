@@ -2,7 +2,7 @@
 
 **本地试用：** 双击 `启动编码器.cmd`。中文操作步骤、Unity 6 接入和宝箱素材说明见 [使用说明.md](使用说明.md)，实际验证结果见 [TEST_REPORT.md](TEST_REPORT.md)。
 
-v0.2 adds transactional video conversion, protected queue output naming, real `.bytes` preview, and a Unity demo creation menu.
+v0.3 adds the self-contained `QEmoGraphic` UGUI workflow and Edit Mode inspector preview. The transactional encoder and custom QANM runtime remain unchanged.
 
 
 QAnimator is a lightweight custom 2D animation codec and runtime for **Unity 6 / Unity 6000**.
@@ -27,7 +27,7 @@ QANM .bytes
     -> QAnimatorDecoder
     -> RGBA frame buffer
     -> reusable Texture2D
-    -> RawImage / SpriteRenderer
+    -> QEmoGraphic (UGUI)
 ```
 
 ## Repository layout
@@ -36,7 +36,8 @@ QANM .bytes
 Encoder/                 Windows encoder (WinForms, .NET 8)
 Tests/QAnimator.CodecSmoke/
                          codec round-trip / validator tests
-Unity/Runtime/           Unity runtime player + output adapters
+Unity/Runtime/           QEmoGraphic + codec runtime
+Unity/Editor/            QEmoGraphic inspector and preview
 Unity/package.json       Unity 6000 UPM package manifest
 .github/workflows/       build + end-to-end conversion validation
 ```
@@ -127,7 +128,7 @@ In Package Manager, add the repository as a Git package with the `Unity` subfold
 https://github.com/quanquanhhh/QAnimator-For-Unity.git?path=/Unity
 ```
 
-The package targets Unity `6000.0` and depends on UGUI for the optional `RawImage` adapter.
+The package targets Unity `6000.0` and depends on UGUI for `QEmoGraphic`.
 
 ### Basic usage
 
@@ -137,41 +138,42 @@ using UnityEngine;
 
 public sealed class Demo : MonoBehaviour
 {
-    [SerializeField] private TextAsset animationData;
-    [SerializeField] private QAnimatorPlayer player;
+    [SerializeField] private QEmoGraphic animation;
 
     private void Start()
     {
-        player.Load(animationData.bytes);
-        player.Loop = true;
-        player.Play();
+        animation.Loop = true;
+        animation.Play();
     }
 }
 ```
 
-`QAnimatorPlayer.Texture` is the reusable playback texture.
+Add one `QEmoGraphic` under a Canvas and assign its **Animation Bytes** field. It displays the first frame in Edit Mode and can auto-play on entering Play Mode. No `RawImage`, `QAnimatorPlayer`, or output adapter is required.
 
-For UGUI, place `QAnimatorPlayer` and `QAnimatorRawImageOutput` on the same object as a `RawImage` (or assign the player reference manually).
+`QEmoGraphic.Texture` is the reusable playback texture. The component renders it directly through `CanvasRenderer`, including UGUI tint and mask support.
 
-For world-space 2D, use `QAnimatorSpriteRendererOutput` with a `SpriteRenderer`.
+QANM v1 stores one animation per `.bytes` file. Its animation name is the Unity `TextAsset` name, so `animation.Play("happy")` selects an assigned `happy.bytes` asset. Assign extra clips under **Additional Animations**; a multi-animation container format is intentionally deferred.
+
+The older `QAnimatorPlayer` output adapters remain available for compatibility and non-UGUI use, but they are no longer the primary workflow.
 
 ### Runtime controls
 
 ```csharp
-player.Play();
-player.Pause();
-player.Resume();
-player.Stop();
-player.Restart();
-player.Seek(0.5f);
-player.Speed = 1.0f;
-player.Loop = true;
+animation.Play();
+animation.Play("happy");
+animation.Pause();
+animation.Resume();
+animation.Stop();
+animation.Restart();
+animation.Seek(0.5f);
+animation.Speed = 1.0f;
+animation.Loop = true;
 ```
 
 Completion callback:
 
 ```csharp
-player.OnComplete += HandleComplete;
+animation.OnComplete += HandleComplete;
 ```
 
 ## Automated verification

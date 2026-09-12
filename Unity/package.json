@@ -1,8 +1,8 @@
 {
   "name": "com.quanquanhhh.qanimator",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "displayName": "QAnimator for Unity",
-  "description": "Custom .bytes 2D animation runtime for Unity. Decodes QAnimator frames directly to Texture2D without Unity VideoPlayer or runtime FFmpeg.",
+  "description": "Self-contained QEmoGraphic UGUI component for custom .bytes 2D animation, with no Unity VideoPlayer or runtime FFmpeg.",
   "unity": "6000.0",
   "dependencies": {
     "com.unity.ugui": "2.0.0"

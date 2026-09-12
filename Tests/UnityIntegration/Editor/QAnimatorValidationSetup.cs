@@ -60,6 +60,15 @@ public static class QAnimatorValidationSetup
                     EditorSceneManager.SaveScene(scene, ScenePath);
                 }
             }
+            if (NeedsQEmoGraphicRebuild(scene))
+            {
+                EditorSceneManager.CloseScene(scene, true);
+                AssetDatabase.DeleteAsset(ScenePath);
+                scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Additive);
+                SceneManager.SetActiveScene(scene);
+                Build();
+                EditorSceneManager.SaveScene(scene, ScenePath);
+            }
             SceneManager.SetActiveScene(scene);
             foreach (var root in scene.GetRootGameObjects())
                 foreach (var label in root.GetComponentsInChildren<Text>()) FitLabel(label);
@@ -69,6 +78,17 @@ public static class QAnimatorValidationSetup
             EditorApplication.isPlaying = true;
         }
         catch (Exception ex) { File.WriteAllText("QAnimatorTestResults/setup-error.txt", ex.ToString()); Debug.LogException(ex); }
+    }
+
+    private static bool NeedsQEmoGraphicRebuild(Scene scene)
+    {
+        foreach (var root in scene.GetRootGameObjects())
+        {
+            var validation = root.GetComponent<QAnimatorValidation>();
+            if (validation != null)
+                return validation.Player == null || validation.Player.GetComponent<QEmoGraphic>() == null;
+        }
+        return true;
     }
 
     private static void Build()
@@ -97,14 +117,21 @@ public static class QAnimatorValidationSetup
         AssetDatabase.CreateAsset(checker, "Assets/QAnimatorValidation/Data/Checker.asset");
         frame.GetComponent<RawImage>().texture = checker;
         frame.GetComponent<RawImage>().uvRect = new Rect(0, 0, 16, 16);
-        var view = new GameObject("Treasure Chest", typeof(RectTransform), typeof(RawImage), typeof(QAnimatorPlayer), typeof(QAnimatorRawImageOutput));
+        var view = new GameObject("Treasure Chest", typeof(RectTransform), typeof(QEmoGraphic));
         view.transform.SetParent(frame.transform, false);
         view.GetComponent<RectTransform>().sizeDelta = new Vector2(512, 512);
         var suite = root.AddComponent<QAnimatorValidation>();
-        suite.Player = view.GetComponent<QAnimatorPlayer>();
-        suite.Output = view.GetComponent<RawImage>();
+        suite.Player = view.GetComponent<QEmoGraphic>();
         suite.Alpha = AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/QAnimatorValidation/Data/treasure_chest_open_alpha.bytes");
         suite.Opaque = AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/QAnimatorValidation/Data/treasure_chest_open.bytes");
+        var graphic = view.GetComponent<QEmoGraphic>();
+        var serialized = new SerializedObject(graphic);
+        serialized.FindProperty("_source").objectReferenceValue = suite.Alpha;
+        var additional = serialized.FindProperty("_additionalAnimations");
+        additional.arraySize = 1;
+        additional.GetArrayElementAtIndex(0).objectReferenceValue = suite.Opaque;
+        serialized.ApplyModifiedPropertiesWithoutUndo();
+        graphic.ReloadEditorPreview();
         suite.Status = Label(root.transform, "QAnimator / Unity 6 · RGBA animation", new Vector2(0, 325), 26);
         Label(root.transform, "512 × 512   /   30 FPS   /   4 seconds", new Vector2(0, -310), 22);
         var controls = root.AddComponent<QAnimatorDemoControls>();

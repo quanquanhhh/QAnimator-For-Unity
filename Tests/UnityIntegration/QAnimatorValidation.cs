@@ -11,11 +11,10 @@ using Debug = UnityEngine.Debug;
 
 public sealed class QAnimatorValidation : MonoBehaviour
 {
-    public QAnimatorPlayer Player;
+    public QEmoGraphic Player;
     public TextAsset Opaque;
     public TextAsset Alpha;
     public Text Status;
-    public RawImage Output;
     public string ReportDirectory = "QAnimatorTestResults";
     private readonly List<string> _passes = new List<string>();
     private string _failure;
@@ -98,7 +97,7 @@ public sealed class QAnimatorValidation : MonoBehaviour
     {
         Player.Pause();
         Check(Player.Width == 512 && Player.Height == 512 && Player.FrameCount == 120 && Player.Fps == 30, "Header: 512x512 / 120 frames / 30 FPS");
-        Check(Output.texture == Player.Texture, "RawImage receives the playback texture");
+        Check(Player.mainTexture == Player.Texture, "QEmoGraphic renders its playback texture directly");
         string[] expected = File.ReadAllLines(Path.Combine(ReportDirectory, "alpha-sha256.txt"));
         var texture = Player.Texture;
         using (var sha = SHA256.Create())
@@ -124,12 +123,12 @@ public sealed class QAnimatorValidation : MonoBehaviour
         Player.Seek(2);
         yield return new WaitForEndOfFrame();
         Capture("alpha-open.png");
-        Player.Load(Opaque);
+        Player.Play(Opaque.name);
         Player.Pause();
         bool allOpaque = true;
         foreach (var pixel in Player.Texture.GetPixels32()) allOpaque &= pixel.a == 255;
-        Check(!Player.HasAlpha && allOpaque, "MP4 loads and all alpha values are opaque");
-        Check(Output.texture == Player.Texture, "RawImage rebinds after loading a new animation");
+        Check(Player.AnimationName == Opaque.name && !Player.HasAlpha && allOpaque, "Play(name) switches assets and MP4 alpha values are opaque");
+        Check(Player.mainTexture == Player.Texture, "QEmoGraphic keeps rendering after loading a new animation");
         Player.Seek(2);
         yield return new WaitForEndOfFrame();
         Capture("mp4-open.png");
@@ -185,23 +184,15 @@ public sealed class QAnimatorValidation : MonoBehaviour
         Player.Restart();
         Check(Player.IsPlaying && Player.CurrentFrame == 0 && Player.CurrentTime == 0, "Restart immediately returns to first frame");
         Player.Pause();
-        var adapter = Output.GetComponent<QAnimatorRawImageOutput>();
-        adapter.enabled = false;
-        adapter.enabled = true;
-        Check(Output.texture == Player.Texture, "RawImage disable/enable reconnects current texture");
-        var spriteHost = new GameObject("SpriteAdapterTest", typeof(SpriteRenderer), typeof(QAnimatorPlayer), typeof(QAnimatorSpriteRendererOutput));
-        var spritePlayer = spriteHost.GetComponent<QAnimatorPlayer>();
-        spritePlayer.Load(Alpha);
-        var renderer = spriteHost.GetComponent<SpriteRenderer>();
-        Check(renderer.sprite != null && renderer.sprite.texture == spritePlayer.Texture, "SpriteRenderer adapter receives reusable playback texture");
-        spritePlayer.Unload();
-        Check(renderer.sprite == null, "SpriteRenderer releases sprite on Unload");
-        Destroy(spriteHost);
+        Player.enabled = false;
+        Check(Player.Texture == null, "QEmoGraphic releases its texture while disabled");
+        Player.enabled = true;
+        Check(Player.Texture != null && Player.mainTexture == Player.Texture, "QEmoGraphic restores its first-frame preview when enabled");
         Player.Unload();
-        Check(!Player.IsLoaded && Player.Texture == null && Output.texture == null, "Unload releases playback texture and clears RawImage");
+        Check(!Player.IsLoaded && Player.Texture == null, "Unload releases the QEmoGraphic playback texture");
         Player.Load(Alpha);
         Player.Seek(2);
-        Check(Player.CurrentFrame == 60 && Output.texture != null, "Reload after Unload reconstructs frame successfully");
+        Check(Player.CurrentFrame == 60 && Player.Texture != null, "Reload after Unload reconstructs frame successfully");
         yield return null;
     }
 
